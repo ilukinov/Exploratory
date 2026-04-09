@@ -47,8 +47,15 @@ public sealed class ChatInputBar
         for (var attempt = 1; attempt <= MaxPasteRetries; attempt++)
         {
             var input = GetInput();
-            _window.SetForeground();
-            Thread.Sleep(FocusSettleMs);
+
+            // First attempt: lean path (no extra sleeps).
+            // Retries: bring window to foreground first to recover from lost focus.
+            if (attempt > 1)
+            {
+                _window.SetForeground();
+                Thread.Sleep(FocusSettleMs);
+            }
+
             input.Click();
             Thread.Sleep(FocusSettleMs);
 
@@ -57,13 +64,13 @@ public sealed class ChatInputBar
             Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
             Thread.Sleep(PasteSettleMs);
 
-            // Verify the paste worked — the Send button should appear when text is present
+            // Verify the paste worked — the Send button appears when text is present
             var sendButton = _window.FindFirstDescendant(cf =>
                 cf.ByAutomationId(AutomationIds.SendButton));
             if (sendButton is not null)
-                return; // paste succeeded
+                return;
 
-            // Also check if the input has text content (Send button may be slow to appear)
+            // Send button may be slow to appear; check input text directly
             if (HasText(input))
                 return;
 
@@ -74,6 +81,7 @@ public sealed class ChatInputBar
             // Clear any partial state before retrying
             if (attempt < MaxPasteRetries)
             {
+                _window.SetForeground();
                 input.Click();
                 Thread.Sleep(FocusSettleMs);
                 Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
@@ -83,12 +91,9 @@ public sealed class ChatInputBar
             }
         }
 
-        // Final fallback: if paste still didn't work, throw with diagnostics
-        var finalInput = GetInput();
-        if (!HasText(finalInput))
-            throw new InvalidOperationException(
-                $"Failed to type message after {MaxPasteRetries} attempts. " +
-                "The clipboard paste did not reach the RichEditBox input.");
+        throw new InvalidOperationException(
+            $"Failed to type message after {MaxPasteRetries} attempts. " +
+            "The clipboard paste did not reach the RichEditBox input.");
     }
 
     private static void SetClipboardText(string text)

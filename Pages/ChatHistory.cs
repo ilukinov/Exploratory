@@ -38,18 +38,18 @@ public sealed class ChatHistory
     /// <summary>
     /// Waits until the agent has posted a response after the user's message.
     ///
-    /// Uses position-based absolute detection rather than snapshot-based counting,
-    /// because fast AI responses (device control, mute, etc.) may arrive before
-    /// this method is called, making before/after diffs unreliable.
+    /// Detection uses structural tree walking (like nextSibling in WebDriver):
+    ///   1. Find the user message bubble (Group with Name == AutomationId == messageText)
+    ///   2. Walk up to its parent ListViewItem in the ChatListView
+    ///   3. Get the next sibling ListViewItem — this is the agent response
+    ///   4. Check if it has any children (response content has rendered)
     ///
-    /// Detection strategies (all check for elements BELOW the user's message bubble):
-    ///   1. Response card marker — AnswerCard Group or action buttons (Copy, Like, etc.)
-    ///   2. Response disclaimer — "AI Companion uses AI. Check for mistakes." text
-    ///   3. Send/Stop button tracking — streaming started (Stop) then finished (absent)
+    /// This is O(1) per poll — no full-tree scans. Falls back to Send/Stop button
+    /// tracking if the tree structure doesn't match expectations.
     /// </summary>
     public bool WaitForAgentResponse(string userMessage, TimeSpan timeout)
     {
-        // Wait for the user message bubble so we can anchor detection to its position
+        // Wait for the user message bubble so we can anchor detection
         var userBubble = WaitHelper.ForElement(
             () => FindMessageBubble(userMessage),
             TimeSpan.FromSeconds(5));
@@ -59,35 +59,63 @@ public sealed class ChatHistory
 
         // Track Send/Stop button transitions as a fallback
         var sawStopState = false;
+        // Track consecutive polls where the button is absent without ever seeing Stop.
+        // For edge-case inputs the app may handle them locally (no AI call), so the
+        // button goes Send → absent without a Stop phase. After enough absent polls
+        // we can safely assume the response is done.
+        var consecutiveAbsentPolls = 0;
+        const int absentPollsThreshold = 7; // ~1 second at 150 ms
+
+        // Use a faster poll interval — agent responses can appear quickly
+        // and the default 500ms can miss transient button states entirely.
+        var fastPoll = TimeSpan.FromMilliseconds(150);
 
         return WaitHelper.Until(
             () =>
             {
-                // Strategy 1 (most reliable): response card elements below user bubble.
-                // Every agent response renders an AnswerCard group and action buttons.
-                // This works regardless of timing — if the response already arrived,
-                // these elements are already present.
-                if (HasResponseCardBelowBubble(userBubble))
+                // Strategy 1 (O(1), preferred): walk to the next sibling of the user
+                // message's ListViewItem. If it exists and has children, the agent responded.
+                if (HasNextSiblingWithContent(userBubble))
                     return true;
 
-                // Strategy 2: Send/Stop button tracking.
+                // Re-find the bubble in case the original reference went stale
+                // after a UI re-render, then retry Strategy 1 with the fresh reference.
+                var freshBubble = FindMessageBubble(userMessage);
+                if (freshBubble is not null)
+                {
+                    userBubble = freshBubble;
+                    if (HasNextSiblingWithContent(freshBubble))
+                        return true;
+                }
+
+                // Strategy 2 (fallback): Send/Stop button tracking.
                 // The button shows Name='Stop' during streaming, then disappears when done.
                 var btn = FindSendButton();
                 if (btn is not null)
                 {
                     var btnName = GetName(btn);
                     if (btnName != AutomationIds.SendButtonLabel)
-                        sawStopState = true; // button is "Stop" → streaming in progress
+                        sawStopState = true;
+                    consecutiveAbsentPolls = 0;
                 }
                 else if (sawStopState)
                 {
-                    // Was "Stop", now absent → streaming finished
                     return true;
+                }
+                else
+                {
+                    // Strategy 3: Button absent without ever seeing Stop state.
+                    // The app likely handled the input locally (e.g. edge-case/invalid
+                    // values). After a sustained absence, treat the response as complete.
+                    consecutiveAbsentPolls++;
+                    if (consecutiveAbsentPolls >= absentPollsThreshold)
+                        return true;
                 }
 
                 return false;
             },
-            timeout);
+            timeout,
+            fastPoll);
     }
 
     /// <summary>
@@ -190,73 +218,44 @@ public sealed class ChatHistory
         FindGroups(predicate).Count;
 
     /// <summary>
-    /// Checks whether a response card exists below the user's message bubble.
-    /// Looks for AnswerCard groups, action buttons (Copy/Like/Dislike/Retry),
-    /// or the per-response disclaimer text that appear with every agent response.
+    /// O(1) sibling-based detection: walks the UI tree from the user message bubble
+    /// up to its parent ListViewItem, then checks the next sibling ListViewItem
+    /// for content (the agent response). This mirrors WebDriver's nextSibling approach.
     ///
-    /// This is position-based (not count-based) so it works regardless of whether
-    /// the response arrived before or after this method was first called.
+    /// Tree structure: ChatListView (ListView) → ListViewItem (user) → ListViewItem (response)
     /// </summary>
-    private bool HasResponseCardBelowBubble(AutomationElement userBubble)
+    private bool HasNextSiblingWithContent(AutomationElement userBubble)
     {
         try
         {
-            var bubbleBottom = userBubble.BoundingRectangle.Bottom;
+            var walker = userBubble.Automation.TreeWalkerFactory.GetControlViewWalker();
 
-            // Check 1: AnswerCard group below the user bubble
-            var answerCards = _window.FindAllDescendants(cf =>
-                cf.ByAutomationId(AutomationIds.AnswerCard));
-            foreach (var card in answerCards)
+            // Walk up from the bubble to find the enclosing ListViewItem
+            var current = walker.GetParent(userBubble);
+            while (current is not null)
             {
-                try
-                {
-                    if (card.BoundingRectangle.Top >= bubbleBottom - 10)
-                        return true;
-                }
-                catch { }
+                if (current.ControlType == ControlType.ListItem)
+                    break;
+                current = walker.GetParent(current);
             }
 
-            // Check 2: action buttons (Copy Answer, Like, Dislike, Retry) below bubble
-            string[] responseButtons =
-                [AutomationIds.CopyAnswer, AutomationIds.LikeButton,
-                 AutomationIds.DislikeButton, AutomationIds.RetryButton];
+            if (current is null)
+                return false;
 
-            foreach (var buttonId in responseButtons)
-            {
-                var buttons = _window.FindAllDescendants(cf => cf.ByAutomationId(buttonId));
-                foreach (var btn in buttons)
-                {
-                    try
-                    {
-                        if (btn.BoundingRectangle.Top >= bubbleBottom - 10)
-                            return true;
-                    }
-                    catch { }
-                }
-            }
+            // Get the next sibling ListViewItem — this is the agent response container
+            var nextSibling = walker.GetNextSibling(current);
+            if (nextSibling is null)
+                return false;
 
-            // Check 3: per-response disclaimer "AI Companion uses AI. Check for mistakes."
-            // (AutomationId matches the text, unlike the static footer which has AutomationId='Body')
-            var disclaimers = _window.FindAllDescendants(cf =>
-                cf.ByControlType(ControlType.Text));
-            foreach (var el in disclaimers)
-            {
-                try
-                {
-                    var autoId = GetAutoId(el);
-                    if (autoId.Contains("AI Companion uses AI", StringComparison.OrdinalIgnoreCase)
-                        && el.BoundingRectangle.Top >= bubbleBottom - 10)
-                        return true;
-                }
-                catch { }
-            }
+            // The response is ready when the sibling has child content rendered
+            var firstChild = walker.GetFirstChild(nextSibling);
+            return firstChild is not null;
         }
         catch (Exception ex)
         {
-            Trace.TraceWarning($"[ChatHistory] HasResponseCardBelowBubble failed: {ex.Message}");
+            Trace.TraceWarning($"[ChatHistory] HasNextSiblingWithContent failed: {ex.Message}");
+            return false;
         }
-
-        return false;
     }
 
     private AutomationElement? FindSendButton()
