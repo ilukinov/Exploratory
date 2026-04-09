@@ -1,0 +1,8 @@
+{
+  "aumid": "AD2F1837.HPAIExperienceCenter_v10z8vjag6ke6!App",
+  "processName": "AICompanion",
+  "expectedWindowTitle": "AI Companion",
+  "launchTimeoutSeconds": 60,
+  "actionTimeoutSeconds": 10,
+  "screenshotOnSuccess": true
+}
