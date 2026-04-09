@@ -16,12 +16,13 @@ public sealed class AppLaunchSteps
 {
     private readonly AppDriver _driver;
     private readonly MainPage _mainPage;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
 
-    public AppLaunchSteps(AppDriver driver, MainPage mainPage)
+    public AppLaunchSteps(AppDriver driver, MainPage mainPage, TestSettings settings)
     {
         _driver = driver;
         _mainPage = mainPage;
+        _settings = settings;
     }
 
     [Given("HP AI Companion is not already running")]

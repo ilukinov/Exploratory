@@ -12,11 +12,15 @@ namespace HPAICOmpanionTester.Pages;
 public sealed class NavigationPanel
 {
     private readonly Window _window;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
 
-    public NavigationPanel(MainPage mainPage)
+    // Time for the UI to settle after pressing the back button from chat view
+    private const int BackButtonSettleMs = 1000;
+
+    public NavigationPanel(MainPage mainPage, TestSettings settings)
     {
         _window = mainPage.Window;
+        _settings = settings;
     }
 
     /// <summary>
@@ -33,7 +37,7 @@ public sealed class NavigationPanel
         // cause false failures.
         WaitHelper.Until(
             () => _window.FindFirstDescendant(cf =>
-                cf.ByAutomationId("PageTitle"))?.Name == sectionName,
+                cf.ByAutomationId(AutomationIds.PageTitle))?.Name == sectionName,
             TimeSpan.FromSeconds(_settings.LaunchTimeoutSeconds));
     }
 
@@ -54,13 +58,13 @@ public sealed class NavigationPanel
     {
         // If the app is in full-screen chat view, there's no NavLinksList —
         // press the back button first to return to the section view.
-        var navList = _window.FindFirstDescendant(cf => cf.ByAutomationId("NavLinksList"));
+        var navList = _window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.NavList));
         if (navList is null)
         {
             var backButton =
-                _window.FindFirstDescendant(cf => cf.ByAutomationId("NavigationViewBackButton"))
-                ?? _window.FindFirstDescendant(cf => cf.ByAutomationId("BackButton"))
-                ?? _window.FindFirstDescendant(cf => cf.ByName("Back"));
+                _window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.BackButton))
+                ?? _window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.BackButtonAlt))
+                ?? _window.FindFirstDescendant(cf => cf.ByName(AutomationIds.BackButtonName));
 
             if (backButton is not null)
             {
@@ -68,12 +72,12 @@ public sealed class NavigationPanel
                     backButton.Patterns.Invoke.Pattern.Invoke();
                 else
                     backButton.Click();
-                Thread.Sleep(1000);
+                Thread.Sleep(BackButtonSettleMs);
             }
         }
 
         return WaitHelper.ForElement(
-            () => _window.FindFirstDescendant(cf => cf.ByAutomationId("NavLinksList")),
+            () => _window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.NavList)),
             TimeSpan.FromSeconds(_settings.ActionTimeoutSeconds))
         ?? throw new InvalidOperationException("NavLinksList not found.");
     }

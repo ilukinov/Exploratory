@@ -8,12 +8,13 @@ public sealed class NavigationSteps
 {
     private readonly NavigationPanel _nav;
     private readonly MainPage _mainPage;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
 
-    public NavigationSteps(NavigationPanel nav, MainPage mainPage)
+    public NavigationSteps(NavigationPanel nav, MainPage mainPage, TestSettings settings)
     {
         _nav = nav;
         _mainPage = mainPage;
+        _settings = settings;
     }
 
     [Given("I navigate to the {string} section")]

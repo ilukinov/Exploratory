@@ -13,18 +13,16 @@ public static class SystemStateReader
     // ── Volume (Core Audio API via COM) ──────────────────────────
 
     /// <summary>
-    /// Returns the current master volume as a percentage (0–100).
+    /// Returns the current master volume as a percentage (0-100).
     /// Uses the Windows Core Audio IAudioEndpointVolume interface.
     /// </summary>
     public static int GetVolume()
     {
-        var deviceEnumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
-        deviceEnumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out var device);
-        var iidAudioEndpointVolume = typeof(IAudioEndpointVolume).GUID;
-        device.Activate(ref iidAudioEndpointVolume, 0, IntPtr.Zero, out var obj);
-        var endpointVolume = (IAudioEndpointVolume)obj;
-        endpointVolume.GetMasterVolumeLevelScalar(out var level);
-        return (int)Math.Round(level * 100);
+        return WithEndpointVolume(epv =>
+        {
+            epv.GetMasterVolumeLevelScalar(out var level);
+            return (int)Math.Round(level * 100);
+        });
     }
 
     /// <summary>
@@ -32,19 +30,45 @@ public static class SystemStateReader
     /// </summary>
     public static bool IsMuted()
     {
-        var deviceEnumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
-        deviceEnumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out var device);
-        var iidAudioEndpointVolume = typeof(IAudioEndpointVolume).GUID;
-        device.Activate(ref iidAudioEndpointVolume, 0, IntPtr.Zero, out var obj);
-        var endpointVolume = (IAudioEndpointVolume)obj;
-        endpointVolume.GetMute(out var mute);
-        return mute;
+        return WithEndpointVolume(epv =>
+        {
+            epv.GetMute(out var mute);
+            return mute;
+        });
+    }
+
+    /// <summary>
+    /// Acquires the default audio endpoint, executes <paramref name="action"/>,
+    /// and releases all COM objects regardless of outcome.
+    /// </summary>
+    private static T WithEndpointVolume<T>(Func<IAudioEndpointVolume, T> action)
+    {
+        object? enumeratorObj = null;
+        object? deviceObj = null;
+        object? volumeObj = null;
+        try
+        {
+            enumeratorObj = new MMDeviceEnumerator();
+            var enumerator = (IMMDeviceEnumerator)enumeratorObj;
+            enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out var device);
+            deviceObj = device;
+
+            var iid = typeof(IAudioEndpointVolume).GUID;
+            device.Activate(ref iid, 0, IntPtr.Zero, out volumeObj);
+            return action((IAudioEndpointVolume)volumeObj);
+        }
+        finally
+        {
+            if (volumeObj is not null) Marshal.ReleaseComObject(volumeObj);
+            if (deviceObj is not null) Marshal.ReleaseComObject(deviceObj);
+            if (enumeratorObj is not null) Marshal.ReleaseComObject(enumeratorObj);
+        }
     }
 
     // ── Brightness (WMI) ─────────────────────────────────────────
 
     /// <summary>
-    /// Returns the current screen brightness as a percentage (0–100).
+    /// Returns the current screen brightness as a percentage (0-100).
     /// Uses WMI WmiMonitorBrightness class. Returns -1 if unavailable
     /// (e.g. on a desktop with no built-in display).
     /// </summary>

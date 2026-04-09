@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using HPAICOmpanionTester.Configuration;
 
 namespace HPAICOmpanionTester.Support;
 
@@ -15,35 +16,34 @@ namespace HPAICOmpanionTester.Support;
 /// </summary>
 public sealed class AppLogReader
 {
-    private static readonly string LogDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        @"Packages\AD2F1837.HPAIExperienceCenter_v10z8vjag6ke6\LocalState");
+    private readonly string _logDirectory;
 
     private static readonly Regex IntentPattern = new(
         @"Final intent:(?<intent>\S+)\tValue:(?<value>.*?) \(at",
         RegexOptions.Compiled);
 
-    private static readonly Regex LogLinePattern = new(
-        @"^(?<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) .+? \[(?<level>\w{3})\] (?<message>.+)",
-        RegexOptions.Compiled);
+    public AppLogReader(TestSettings settings)
+    {
+        _logDirectory = settings.AppLocalStatePath;
+    }
 
     /// <summary>
     /// Returns the path to today's log file, or the most recent one if today's
     /// doesn't exist yet.
     /// </summary>
-    public static string? GetCurrentLogPath()
+    public string? GetCurrentLogPath()
     {
-        if (!Directory.Exists(LogDirectory))
+        if (!Directory.Exists(_logDirectory))
             return null;
 
         // Try today's log first
         var today = $"HelicarrierLog{DateTime.Now:yyyyMMdd}.log";
-        var todayPath = Path.Combine(LogDirectory, today);
+        var todayPath = Path.Combine(_logDirectory, today);
         if (File.Exists(todayPath))
             return todayPath;
 
         // Fall back to the most recent log
-        return Directory.GetFiles(LogDirectory, "HelicarrierLog*.log")
+        return Directory.GetFiles(_logDirectory, "HelicarrierLog*.log")
             .OrderByDescending(File.GetLastWriteTime)
             .FirstOrDefault();
     }
@@ -53,7 +53,7 @@ public sealed class AppLogReader
     /// the action you want to observe, then pass the bookmark to
     /// <see cref="GetNewLinesSince"/> after the action completes.
     /// </summary>
-    public static long Bookmark()
+    public long Bookmark()
     {
         var path = GetCurrentLogPath();
         if (path is null) return 0;
@@ -72,7 +72,7 @@ public sealed class AppLogReader
     /// <summary>
     /// Reads all lines appended to the log since the given bookmark position.
     /// </summary>
-    public static List<string> GetNewLinesSince(long bookmark)
+    public List<string> GetNewLinesSince(long bookmark)
     {
         var path = GetCurrentLogPath();
         if (path is null) return [];
@@ -99,7 +99,7 @@ public sealed class AppLogReader
     /// Extracts all "Final intent" entries from lines appended since the bookmark.
     /// Returns tuples of (intent, value).
     /// </summary>
-    public static List<(string Intent, string Value)> GetIntentsSince(long bookmark)
+    public List<(string Intent, string Value)> GetIntentsSince(long bookmark)
     {
         var lines = GetNewLinesSince(bookmark);
         var results = new List<(string, string)>();
@@ -117,10 +117,9 @@ public sealed class AppLogReader
     /// <summary>
     /// Returns all error-level ([ERR]) log lines since the bookmark.
     /// </summary>
-    public static List<string> GetErrorsSince(long bookmark)
+    public List<string> GetErrorsSince(long bookmark)
     {
-        var lines = GetNewLinesSince(bookmark);
-        return lines
+        return GetNewLinesSince(bookmark)
             .Where(l => l.Contains("[ERR]"))
             .ToList();
     }
@@ -129,23 +128,24 @@ public sealed class AppLogReader
     /// Waits until a specific intent appears in the log since the bookmark,
     /// or the timeout expires.
     /// </summary>
-    public static (string Intent, string Value)? WaitForIntent(
+    public (string Intent, string Value)? WaitForIntent(
         long bookmark, string expectedIntent, TimeSpan timeout)
     {
-        var deadline = DateTime.UtcNow + timeout;
+        (string Intent, string Value)? result = null;
 
-        while (DateTime.UtcNow < deadline)
+        WaitHelper.Until(() =>
         {
-            var intents = GetIntentsSince(bookmark);
-            var match = intents.FirstOrDefault(i =>
-                i.Intent.Equals(expectedIntent, StringComparison.OrdinalIgnoreCase));
+            var match = GetIntentsSince(bookmark)
+                .FirstOrDefault(i => i.Intent.Equals(expectedIntent, StringComparison.OrdinalIgnoreCase));
 
             if (match != default)
-                return match;
+            {
+                result = match;
+                return true;
+            }
+            return false;
+        }, timeout);
 
-            Thread.Sleep(500);
-        }
-
-        return null;
+        return result;
     }
 }

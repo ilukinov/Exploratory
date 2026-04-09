@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Input;
 using FlaUI.Core.WindowsAPI;
@@ -13,15 +14,18 @@ namespace HPAICOmpanionTester.Pages;
 public sealed class ChatInputBar
 {
     private readonly Window _window;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
 
     // WinUI 3 RichEditBox needs time to settle after focus and after clipboard paste
     private const int FocusSettleMs = 300;
-    private const int PasteSettleMs = 400;
+    private const int PasteSettleMs = 500;
+    // Maximum number of paste retry attempts before giving up
+    private const int MaxPasteRetries = 3;
 
-    public ChatInputBar(MainPage mainPage)
+    public ChatInputBar(MainPage mainPage, TestSettings settings)
     {
         _window = mainPage.Window;
+        _settings = settings;
     }
 
     /// <summary>
@@ -34,23 +38,85 @@ public sealed class ChatInputBar
     ///
     /// System.Windows.Forms.Clipboard requires an STA thread; we spin one up so that
     /// NUnit's default MTA thread is not affected.
+    ///
+    /// Because clipboard paste can silently fail (lost focus, timing issues), the method
+    /// verifies that text actually reached the input and retries if it didn't.
     /// </summary>
     public void TypeMessage(string message)
     {
-        var input = GetInput();
-        _window.SetForeground();
-        input.Click();
-        Thread.Sleep(FocusSettleMs);
+        for (var attempt = 1; attempt <= MaxPasteRetries; attempt++)
+        {
+            var input = GetInput();
+            _window.SetForeground();
+            Thread.Sleep(FocusSettleMs);
+            input.Click();
+            Thread.Sleep(FocusSettleMs);
 
-        // Set clipboard on a dedicated STA thread (WinForms Clipboard requirement)
-        var sta = new Thread(() => System.Windows.Forms.Clipboard.SetText(message));
+            SetClipboardText(message);
+
+            Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
+            Thread.Sleep(PasteSettleMs);
+
+            // Verify the paste worked — the Send button should appear when text is present
+            var sendButton = _window.FindFirstDescendant(cf =>
+                cf.ByAutomationId(AutomationIds.SendButton));
+            if (sendButton is not null)
+                return; // paste succeeded
+
+            // Also check if the input has text content (Send button may be slow to appear)
+            if (HasText(input))
+                return;
+
+            Trace.TraceWarning(
+                $"[ChatInputBar] Paste attempt {attempt}/{MaxPasteRetries} failed — " +
+                "Send button not found and input appears empty. Retrying...");
+
+            // Clear any partial state before retrying
+            if (attempt < MaxPasteRetries)
+            {
+                input.Click();
+                Thread.Sleep(FocusSettleMs);
+                Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
+                Thread.Sleep(100);
+                Keyboard.Press(VirtualKeyShort.DELETE);
+                Thread.Sleep(FocusSettleMs);
+            }
+        }
+
+        // Final fallback: if paste still didn't work, throw with diagnostics
+        var finalInput = GetInput();
+        if (!HasText(finalInput))
+            throw new InvalidOperationException(
+                $"Failed to type message after {MaxPasteRetries} attempts. " +
+                "The clipboard paste did not reach the RichEditBox input.");
+    }
+
+    private static void SetClipboardText(string text)
+    {
+        var sta = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
         sta.SetApartmentState(ApartmentState.STA);
         sta.Start();
         sta.Join();
+    }
 
-        // Paste into the focused input
-        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
-        Thread.Sleep(PasteSettleMs); // allow TextChanged events to update the send button
+    private static bool HasText(AutomationElement input)
+    {
+        try
+        {
+            if (input.Patterns.Text.IsSupported)
+            {
+                var text = input.Patterns.Text.Pattern.DocumentRange.GetText(-1);
+                return !string.IsNullOrWhiteSpace(text);
+            }
+
+            if (input.Patterns.Value.IsSupported)
+            {
+                var value = input.Patterns.Value.Pattern.Value.Value;
+                return !string.IsNullOrWhiteSpace(value);
+            }
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>
@@ -61,7 +127,7 @@ public sealed class ChatInputBar
     {
         var sendButton = WaitHelper.ForElement(
             () => _window.FindFirstDescendant(cf =>
-                cf.ByAutomationId("SendOrPauseUserPromptEvent")),
+                cf.ByAutomationId(AutomationIds.SendButton)),
             TimeSpan.FromSeconds(_settings.ActionTimeoutSeconds))
             ?? throw new InvalidOperationException(
                 "Send button not found. Make sure text has been typed into the input first.");
@@ -89,12 +155,12 @@ public sealed class ChatInputBar
             {
                 // Primary signal: button switched to Pause (AI is actively streaming)
                 var btn = _window.FindFirstDescendant(cf =>
-                    cf.ByAutomationId("SendOrPauseUserPromptEvent"));
-                if (btn is null || btn.Name != "Send") return true;
+                    cf.ByAutomationId(AutomationIds.SendButton));
+                if (btn is null || btn.Name != AutomationIds.SendButtonLabel) return true;
 
                 // Secondary signal: input text was cleared after submission
                 var input = _window.FindFirstDescendant(cf =>
-                    cf.ByAutomationId("richEditBox"));
+                    cf.ByAutomationId(AutomationIds.ChatInput));
                 if (input is null) return true;
 
                 if (input.Patterns.Text.IsSupported)
@@ -115,12 +181,12 @@ public sealed class ChatInputBar
 
     public bool IsVisible() =>
         WaitHelper.ForElement(
-            () => _window.FindFirstDescendant(cf => cf.ByAutomationId("richEditBox")),
+            () => _window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.ChatInput)),
             TimeSpan.FromSeconds(_settings.ActionTimeoutSeconds)) is not null;
 
     private AutomationElement GetInput() =>
         WaitHelper.ForElement(
-            () => _window.FindFirstDescendant(cf => cf.ByAutomationId("richEditBox")),
+            () => _window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.ChatInput)),
             TimeSpan.FromSeconds(_settings.ActionTimeoutSeconds))
         ?? throw new InvalidOperationException("Chat input (richEditBox) not found.");
 }

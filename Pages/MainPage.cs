@@ -1,6 +1,5 @@
 using System.Drawing;
 using FlaUI.Core.AutomationElements;
-using FlaUI.Core.Definitions;
 using HPAICOmpanionTester.Drivers;
 using HPAICOmpanionTester.Support;
 
@@ -63,7 +62,7 @@ public sealed class MainPage
         {
             try
             {
-                return Window.FindFirstDescendant(cf => cf.ByAutomationId("PageTitle"))?.Name
+                return Window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.PageTitle))?.Name
                        ?? string.Empty;
             }
             catch
@@ -95,11 +94,11 @@ public sealed class MainPage
             () =>
             {
                 var hasNavAndTitle =
-                    Window.FindFirstDescendant(cf => cf.ByAutomationId("NavLinksList")) is not null
-                    && Window.FindFirstDescendant(cf => cf.ByAutomationId("PageTitle")) is not null;
+                    Window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.NavList)) is not null
+                    && Window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.PageTitle)) is not null;
 
                 var hasChatInput =
-                    Window.FindFirstDescendant(cf => cf.ByAutomationId("richEditBox")) is not null;
+                    Window.FindFirstDescendant(cf => cf.ByAutomationId(AutomationIds.ChatInput)) is not null;
 
                 return hasNavAndTitle || hasChatInput;
             },

@@ -7,11 +7,18 @@ namespace HPAICOmpanionTester.StepDefinitions;
 public sealed class PerformAgentSteps
 {
     private readonly ScenarioContext _scenarioContext;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
+    private readonly AppLogReader _logReader;
 
-    public PerformAgentSteps(ScenarioContext scenarioContext)
+    // Brief pause to allow the app to finish processing before checking results
+    private const int ProcessingSettleMs = 2000;
+    private const int ShortSettleMs = 1000;
+
+    public PerformAgentSteps(ScenarioContext scenarioContext, TestSettings settings, AppLogReader logReader)
     {
         _scenarioContext = scenarioContext;
+        _settings = settings;
+        _logReader = logReader;
     }
 
     // ── Bookmarks & Snapshots ────────────────────────────────────
@@ -21,7 +28,7 @@ public sealed class PerformAgentSteps
     [Then("I bookmark the app log")]
     public void GivenIBookmarkTheAppLog()
     {
-        _scenarioContext["LogBookmark"] = AppLogReader.Bookmark();
+        _scenarioContext["LogBookmark"] = _logReader.Bookmark();
     }
 
     [Given("I note the current system volume")]
@@ -43,7 +50,7 @@ public sealed class PerformAgentSteps
     {
         var bookmark = (long)_scenarioContext["LogBookmark"];
 
-        var result = AppLogReader.WaitForIntent(
+        var result = _logReader.WaitForIntent(
             bookmark, expectedIntent, TimeSpan.FromSeconds(_settings.ActionTimeoutSeconds));
 
         result.Should().NotBeNull(
@@ -58,7 +65,7 @@ public sealed class PerformAgentSteps
     {
         var bookmark = (long)_scenarioContext["LogBookmark"];
 
-        var result = AppLogReader.WaitForIntent(
+        var result = _logReader.WaitForIntent(
             bookmark, expectedIntent, TimeSpan.FromSeconds(_settings.ActionTimeoutSeconds));
 
         result.Should().NotBeNull(
@@ -69,10 +76,10 @@ public sealed class PerformAgentSteps
     public void ThenNoLogErrors()
     {
         // Give the app a moment to finish processing
-        Thread.Sleep(2000);
+        Thread.Sleep(ProcessingSettleMs);
 
         var bookmark = (long)_scenarioContext["LogBookmark"];
-        var errors = AppLogReader.GetErrorsSince(bookmark);
+        var errors = _logReader.GetErrorsSince(bookmark);
 
         errors.Should().BeEmpty(
             because: "the command should not produce any errors in the app log");
@@ -120,11 +127,11 @@ public sealed class PerformAgentSteps
     public void ThenPrintIntentsAndErrors()
     {
         // Allow the agent to finish processing
-        Thread.Sleep(1000);
+        Thread.Sleep(ShortSettleMs);
 
         var bookmark = (long)_scenarioContext["LogBookmark"];
-        var intents = AppLogReader.GetIntentsSince(bookmark);
-        var errors = AppLogReader.GetErrorsSince(bookmark);
+        var intents = _logReader.GetIntentsSince(bookmark);
+        var errors = _logReader.GetErrorsSince(bookmark);
 
         if (intents.Count > 0)
         {
@@ -149,7 +156,7 @@ public sealed class PerformAgentSteps
     public void ThenVolumeShouldNotHaveChanged(int expected)
     {
         // Wait briefly to allow any unintended change to take effect
-        Thread.Sleep(2000);
+        Thread.Sleep(ProcessingSettleMs);
         var actual = SystemStateReader.GetVolume();
         actual.Should().BeCloseTo(expected, 5,
             because: $"a non-numeric value should not change the volume from {expected}% (actual: {actual}%) — the agent should reject invalid input, not default to 50%");

@@ -15,6 +15,23 @@ public sealed class TestSettings
     public int ActionTimeoutSeconds { get; init; } = 10;
     public bool ScreenshotOnSuccess { get; init; } = false;
 
+    /// <summary>
+    /// Derives the package family name from the AUMID (everything before the '!').
+    /// E.g. "AD2F1837.HPAIExperienceCenter_v10z8vjag6ke6!App"
+    ///    → "AD2F1837.HPAIExperienceCenter_v10z8vjag6ke6"
+    /// </summary>
+    public string PackageFamilyName =>
+        Aumid.Contains('!') ? Aumid[..Aumid.IndexOf('!')] : Aumid;
+
+    /// <summary>
+    /// The LocalState directory for the app's MSIX package, where logs are written.
+    /// </summary>
+    public string AppLocalStatePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Packages",
+        PackageFamilyName,
+        "LocalState");
+
     private static readonly Lazy<TestSettings> _instance = new(() =>
     {
         var path = Path.Combine(AppContext.BaseDirectory, "testSettings.json");

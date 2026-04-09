@@ -22,9 +22,9 @@ public sealed class AppDriver
 {
     private readonly TestSettings _settings;
 
-    public AppDriver()
+    public AppDriver(TestSettings settings)
     {
-        _settings = TestSettings.Load();
+        _settings = settings;
     }
 
     /// <summary>

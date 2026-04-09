@@ -4,6 +4,7 @@ using HPAICOmpanionTester.Configuration;
 using HPAICOmpanionTester.Drivers;
 using HPAICOmpanionTester.Support;
 using Reqnroll;
+using Reqnroll.BoDi;
 
 namespace HPAICOmpanionTester.Hooks;
 
@@ -24,13 +25,20 @@ public sealed class AppHooks
     private readonly AppDriver _driver;
     private readonly ScenarioContext _scenarioContext;
     private readonly IReqnrollOutputHelper _outputHelper;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
 
-    public AppHooks(AppDriver driver, ScenarioContext scenarioContext, IReqnrollOutputHelper outputHelper)
+    public AppHooks(AppDriver driver, ScenarioContext scenarioContext, IReqnrollOutputHelper outputHelper, TestSettings settings)
     {
         _driver = driver;
         _scenarioContext = scenarioContext;
         _outputHelper = outputHelper;
+        _settings = settings;
+    }
+
+    [BeforeTestRun]
+    public static void RegisterDependencies(IObjectContainer container)
+    {
+        container.RegisterInstanceAs(TestSettings.Load());
     }
 
     [AfterScenario]

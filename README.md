@@ -10,7 +10,7 @@ A BDD test suite for HP AI Companion v2.6.1003.0 using **Reqnroll** (SpecFlow su
   - Download from: https://dotnet.microsoft.com/en-us/download/dotnet/10.0
   - Verify: `dotnet --version`
 - **HP AI Companion v2.6.1003.0** installed and available in Start Menu
-  - App must be logged in and functional before test runs
+  - **You must log in to the app with a valid account before running tests.** Launch HP AI Companion manually, complete the sign-in flow, and confirm the Home screen loads. The test framework does not handle authentication — it expects the app to be in a logged-in state so that subsequent automated launches skip the login screen.
   - Tests will launch and close the app automatically
 
 ### Development Setup

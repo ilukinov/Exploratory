@@ -8,14 +8,15 @@ public sealed class ChatSteps
 {
     private readonly ChatInputBar _chatInput;
     private readonly ChatHistory _chatHistory;
-    private readonly TestSettings _settings = TestSettings.Load();
+    private readonly TestSettings _settings;
     private readonly ScenarioContext _scenarioContext;
 
-    public ChatSteps(ChatInputBar chatInput, ChatHistory chatHistory, ScenarioContext scenarioContext)
+    public ChatSteps(ChatInputBar chatInput, ChatHistory chatHistory, ScenarioContext scenarioContext, TestSettings settings)
     {
         _chatInput = chatInput;
         _chatHistory = chatHistory;
         _scenarioContext = scenarioContext;
+        _settings = settings;
     }
 
     [Then("the chat input should be visible and enabled")]
