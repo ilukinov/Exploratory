@@ -30,11 +30,11 @@ The project root includes `.vscode/settings.json` which configures the Cucumber 
 ```json
 {
   "cucumber.features": [
-    "HPAICOmpanionTester/Features/**/*.feature"
+    "Features/**/*.feature"
   ],
   "cucumber.glue": [
-    "HPAICOmpanionTester/StepDefinitions/**/*.cs",
-    "HPAICOmpanionTester/Hooks/**/*.cs"
+    "StepDefinitions/**/*.cs",
+    "Hooks/**/*.cs"
   ]
 }
 ```
