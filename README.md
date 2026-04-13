@@ -86,58 +86,61 @@ When a scenario fails, a screenshot is automatically captured and saved to:
 HPAICOmpanionTester/bin/Debug/net10.0-windows/screenshots/screenshot_YYYY-MM-DD_HH-mm-ss-fff.png
 ```
 
-After the test run completes, an interactive gallery index is generated at:
-```
-HPAICOmpanionTester/bin/Debug/net10.0-windows/screenshots/index.html
-```
-
-Open the gallery to browse all failure screenshots with timestamps. Each screenshot shows the app state at the moment of failure, helping debug UI issues
+Each screenshot shows the app state at the moment of failure, helping debug UI issues.
 
 ## Architecture
 
 ### Directory Structure
 ```
 HPAICOmpanionTester/
-├── Features/                 # Gherkin .feature files (BDD specs)
-│   ├── AppLaunch.feature    # App startup tests
-│   ├── Chat.feature         # Chat input tests (Home section)
-│   ├── Navigation.feature   # Left menu navigation tests
-│   └── Perform.feature      # Chat tests on Perform section
+├── Features/                        # Gherkin .feature files (BDD specs)
+│   ├── AppLaunch.feature           # App startup tests
+│   ├── Navigation.feature          # Left menu navigation tests
+│   ├── Chat.feature                # Chat interaction tests (Home & Perform)
+│   ├── EditMessage.feature         # Edit sent message & response regeneration
+│   ├── PerformAgent.feature        # Perform agent device control (volume, brightness)
+│   ├── ResponseBenchmark.feature   # Cross-section response detection benchmark
+│   ├── PerformAgentProbe.feature   # Comprehensive command probing (33 scenarios)
+│   └── FeatureOrder.cs             # NUnit [Order] attributes for execution order
 │
-├── StepDefinitions/          # C# step implementations
+├── StepDefinitions/                 # C# step implementations
 │   ├── AppLaunchSteps.cs
 │   ├── NavigationSteps.cs
-│   └── ChatSteps.cs
+│   ├── ChatSteps.cs
+│   └── PerformAgentSteps.cs        # Log bookmarks, intent assertions, system state
 │
-├── Hooks/                    # Reqnroll lifecycle hooks
-│   └── AppHooks.cs          # Scenario/test-run setup & teardown
+├── Hooks/                           # Reqnroll lifecycle hooks
+│   └── AppHooks.cs                 # Scenario/test-run setup & teardown
 │
-├── Drivers/                  # FlaUI app automation
-│   ├── AppDriver.cs         # App launch/close & process management
-│   └── AppSession.cs        # Shared FlaUI session (app instance reuse)
+├── Drivers/                         # FlaUI app automation
+│   ├── AppDriver.cs                # App launch/close & process management
+│   └── AppSession.cs               # Shared FlaUI session (app instance reuse)
 │
-├── Pages/                    # Page Object Model
-│   ├── MainPage.cs          # Main window interaction (title, visibility, interactivity)
-│   ├── NavigationPanel.cs   # Left nav menu (section clicks)
-│   └── ChatInputBar.cs      # Chat input & send (text typing, message submission)
+├── Pages/                           # Page Object Model
+│   ├── AutomationIds.cs            # Centralised UI element ID constants
+│   ├── MainPage.cs                 # Main window interaction (title, visibility)
+│   ├── NavigationPanel.cs          # Left nav menu (section clicks)
+│   ├── ChatInputBar.cs             # Chat input & send (clipboard paste, submission)
+│   └── ChatHistory.cs              # Agent response detection, message bubbles
 │
 ├── Configuration/
-│   └── TestSettings.cs      # Timeouts & app identifiers (AUMID, process name)
+│   └── TestSettings.cs             # Timeouts & app identifiers (AUMID, process name)
 │
 ├── Support/
-│   ├── WaitHelper.cs          # Retry/polling utilities
-│   ├── ScreenshotHelper.cs    # Screenshot capture on failure
-│   └── ScreenshotIndexGenerator.cs # Screenshot gallery HTML
+│   ├── WaitHelper.cs               # Retry/polling utilities
+│   ├── ScreenshotHelper.cs         # Screenshot capture on failure
+│   ├── AppLogReader.cs             # App log parsing (intents, errors, bookmarks)
+│   └── SystemStateReader.cs        # Windows APIs (volume, brightness)
 │
-├── testSettings.json         # Configuration (AUMID, process name, timeouts)
-├── reqnroll.json            # Reqnroll formatter config (HTML report generation)
-└── README.md                # This file
+├── testSettings.json                # Configuration (AUMID, process name, timeouts)
+├── reqnroll.json                   # Reqnroll formatter config (HTML report generation)
+└── README.md                       # This file
 ```
 
 ### Key Design Patterns
 
 #### Page Object Model (POM)
-All UI automation is encapsulated in page objects (`MainPage`, `NavigationPanel`, `ChatInputBar`). Step definitions contain zero FlaUI code — they're plain English delegating to these pages.
+All UI automation is encapsulated in page objects (`MainPage`, `NavigationPanel`, `ChatInputBar`, `ChatHistory`). Step definitions contain zero FlaUI code — they're plain English delegating to these pages.
 
 ```csharp
 // Step definition (readable, no UI code)
@@ -197,13 +200,16 @@ public ChatSteps(ChatInputBar chatInputBar, MainPage mainPage)
 
 ## Current Test Suite
 
-| Feature | Scenarios | Status |
+| Feature | Scenarios | Description |
 |---|---|---|
-| AppLaunch | 1 | ✓ Pass (explicit kill + fresh launch) |
-| Chat (Home) | 2 | ✓ Pass (typing, sending, response detection) |
-| Navigation | 5 | ✓ Pass (all 5 sections: Home, Library, Perform, Spotlight, Help) |
-| Perform Screen | 2 | ✓ Pass (chat on Perform section) |
-| **Total** | **10** | **~36 seconds** |
+| AppLaunch | 1 | Explicit kill + fresh launch, window & Home page verification |
+| Navigation | 5 | All sections: Home, Library, Perform, Spotlight, Help |
+| Chat | 2 | Typing, sending, response detection (Home & Perform) |
+| EditMessage | 2 | Edit triggers response regeneration, removes subsequent messages |
+| PerformAgent | 13 | Device control: volume/brightness, edge cases, boundary values |
+| ResponseBenchmark | 1 | Cross-section response detection (Home→Perform→Home→Perform) |
+| PerformAgentProbe | 33 | Command probing: audio, display, camera, mouse, power, presets |
+| **Total** | **~57** | |
 
 ## Timeouts (Configurable)
 
@@ -269,4 +275,4 @@ Create `StepDefinitions/LibrarySteps.cs` and `Pages/LibraryPanel.cs` following e
 
 **Built with:** Reqnroll 3.3.4, NUnit 4.5.1, FlaUI 4.0.0, FluentAssertions 6.12.0
 **Target:** .NET 10
-**Last Updated:** 2026-04-08
+**Last Updated:** 2026-04-12

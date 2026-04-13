@@ -38,84 +38,76 @@ public sealed class ChatHistory
     /// <summary>
     /// Waits until the agent has posted a response after the user's message.
     ///
-    /// Detection uses structural tree walking (like nextSibling in WebDriver):
-    ///   1. Find the user message bubble (Group with Name == AutomationId == messageText)
-    ///   2. Walk up to its parent ListViewItem in the ChatListView
-    ///   3. Get the next sibling ListViewItem — this is the agent response
-    ///   4. Check if it has any children (response content has rendered)
+    /// UI tree structure (from FlaUInspect):
+    ///   AnswerCard
+    ///   ├── questionGrid   ← created immediately on send (holds user bubble)
+    ///   └── AnswerGrid     ← appears when the agent response arrives
+    ///       └── ResponseButtonsGrid  ← Copy/Like/Dislike/Retry buttons
     ///
-    /// This is O(1) per poll — no full-tree scans. Falls back to Send/Stop button
-    /// tracking if the tree structure doesn't match expectations.
+    /// Detection: ResponseButtonsGrid only appears with the final rendered response
+    /// (not during "Thinking..." state). We compare the current count of
+    /// ResponseButtonsGrid elements against a baseline taken before submission.
+    /// A new one means a new completed response — immune to duplicate message texts
+    /// in chat history and section switches.
     /// </summary>
-    public bool WaitForAgentResponse(string userMessage, TimeSpan timeout)
+    /// <summary>
+    /// Waits until the agent has posted a response after the user's message.
+    ///
+    /// UI tree during "Thinking..." state:
+    ///   AnswerGrid → ResponseButtonsGrid + Text "Thinking"
+    ///
+    /// UI tree when response is complete:
+    ///   AnswerGrid → ResponseButtonsGrid + Text "assistant name" + Group "response text" + ...
+    ///                (no "Thinking" text)
+    ///
+    /// Detection: find the last AnswerCard, check its AnswerGrid has children
+    /// AND the "Thinking" text is gone (replaced by actual response content).
+    /// </summary>
+    public bool WaitForAgentResponse(TimeSpan timeout)
     {
-        // Wait for the user message bubble so we can anchor detection
-        var userBubble = WaitHelper.ForElement(
-            () => FindMessageBubble(userMessage),
-            TimeSpan.FromSeconds(5));
-
-        if (userBubble is null)
-            return false;
-
-        // Track Send/Stop button transitions as a fallback
-        var sawStopState = false;
-        // Track consecutive polls where the button is absent without ever seeing Stop.
-        // For edge-case inputs the app may handle them locally (no AI call), so the
-        // button goes Send → absent without a Stop phase. After enough absent polls
-        // we can safely assume the response is done.
-        var consecutiveAbsentPolls = 0;
-        const int absentPollsThreshold = 7; // ~1 second at 150 ms
-
-        // Use a faster poll interval — agent responses can appear quickly
-        // and the default 500ms can miss transient button states entirely.
-        var fastPoll = TimeSpan.FromMilliseconds(150);
+        var fastPoll = TimeSpan.FromMilliseconds(200);
 
         return WaitHelper.Until(
             () =>
             {
-                // Strategy 1 (O(1), preferred): walk to the next sibling of the user
-                // message's ListViewItem. If it exists and has children, the agent responded.
-                if (HasNextSiblingWithContent(userBubble))
-                    return true;
+                var cards = FindAllAnswerCards();
+                if (cards.Length == 0)
+                    return false;
 
-                // Re-find the bubble in case the original reference went stale
-                // after a UI re-render, then retry Strategy 1 with the fresh reference.
-                var freshBubble = FindMessageBubble(userMessage);
-                if (freshBubble is not null)
-                {
-                    userBubble = freshBubble;
-                    if (HasNextSiblingWithContent(freshBubble))
-                        return true;
-                }
+                var lastCard = cards[^1];
+                var answerGrid = FindChildByAutomationId(lastCard, AutomationIds.AnswerGrid);
+                if (answerGrid is null)
+                    return false;
 
-                // Strategy 2 (fallback): Send/Stop button tracking.
-                // The button shows Name='Stop' during streaming, then disappears when done.
-                var btn = FindSendButton();
-                if (btn is not null)
-                {
-                    var btnName = GetName(btn);
-                    if (btnName != AutomationIds.SendButtonLabel)
-                        sawStopState = true;
-                    consecutiveAbsentPolls = 0;
-                }
-                else if (sawStopState)
-                {
-                    return true;
-                }
-                else
-                {
-                    // Strategy 3: Button absent without ever seeing Stop state.
-                    // The app likely handled the input locally (e.g. edge-case/invalid
-                    // values). After a sustained absence, treat the response as complete.
-                    consecutiveAbsentPolls++;
-                    if (consecutiveAbsentPolls >= absentPollsThreshold)
-                        return true;
-                }
-
-                return false;
+                // Response is complete when AnswerGrid exists but no longer shows "Thinking"
+                return !HasThinkingIndicator(answerGrid);
             },
             timeout,
             fastPoll);
+    }
+
+    /// <summary>
+    /// Checks whether the AnswerGrid contains a "Thinking" text element,
+    /// indicating the response is still being generated.
+    /// </summary>
+    private static bool HasThinkingIndicator(AutomationElement answerGrid)
+    {
+        try
+        {
+            var thinkingEl = answerGrid.FindFirstChild(cf =>
+                cf.ByControlType(ControlType.Text).And(cf.ByName("Thinking")));
+            return thinkingEl is not null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private AutomationElement[] FindAllAnswerCards()
+    {
+        try { return _window.FindAllDescendants(cf => cf.ByAutomationId(AutomationIds.AnswerCard)); }
+        catch { return []; }
     }
 
     /// <summary>
@@ -214,47 +206,47 @@ public sealed class ChatHistory
         }
     }
 
-    private int CountGroups(Func<AutomationElement, bool> predicate) =>
-        FindGroups(predicate).Count;
-
     /// <summary>
-    /// O(1) sibling-based detection: walks the UI tree from the user message bubble
-    /// up to its parent ListViewItem, then checks the next sibling ListViewItem
-    /// for content (the agent response). This mirrors WebDriver's nextSibling approach.
-    ///
-    /// Tree structure: ChatListView (ListView) → ListViewItem (user) → ListViewItem (response)
+    /// Finds the AnswerCard that contains the given user message.
+    /// Walks up from the user bubble (Group "hi" "hi") through questionGrid
+    /// to the enclosing AnswerCard.
     /// </summary>
-    private bool HasNextSiblingWithContent(AutomationElement userBubble)
+    private AutomationElement? FindAnswerCardForMessage(string messageText)
     {
         try
         {
-            var walker = userBubble.Automation.TreeWalkerFactory.GetControlViewWalker();
+            var bubble = FindMessageBubble(messageText);
+            if (bubble is null)
+                return null;
 
-            // Walk up from the bubble to find the enclosing ListViewItem
-            var current = walker.GetParent(userBubble);
+            // Walk up: bubble → questionGrid → AnswerCard
+            var walker = bubble.Automation.TreeWalkerFactory.GetControlViewWalker();
+            var current = walker.GetParent(bubble);
             while (current is not null)
             {
-                if (current.ControlType == ControlType.ListItem)
-                    break;
+                if (GetAutoId(current) == AutomationIds.AnswerCard)
+                    return current;
                 current = walker.GetParent(current);
             }
 
-            if (current is null)
-                return false;
-
-            // Get the next sibling ListViewItem — this is the agent response container
-            var nextSibling = walker.GetNextSibling(current);
-            if (nextSibling is null)
-                return false;
-
-            // The response is ready when the sibling has child content rendered
-            var firstChild = walker.GetFirstChild(nextSibling);
-            return firstChild is not null;
+            return null;
         }
         catch (Exception ex)
         {
-            Trace.TraceWarning($"[ChatHistory] HasNextSiblingWithContent failed: {ex.Message}");
-            return false;
+            Trace.TraceWarning($"[ChatHistory] FindAnswerCardForMessage failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static AutomationElement? FindChildByAutomationId(AutomationElement parent, string automationId)
+    {
+        try
+        {
+            return parent.FindFirstChild(cf => cf.ByAutomationId(automationId));
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -303,14 +295,20 @@ public sealed class ChatHistory
         return name == GetAutoId(el);
     }
 
+    /// <summary>
+    /// Returns the last (most recent) message bubble matching <paramref name="messageText"/>.
+    /// Chat history accumulates across scenarios — the same text may appear multiple
+    /// times, so we need the last match (latest message), not the first.
+    /// </summary>
     private AutomationElement? FindMessageBubble(string messageText)
     {
         try
         {
-            return _window.FindFirstDescendant(cf =>
+            var all = _window.FindAllDescendants(cf =>
                 cf.ByControlType(ControlType.Group)
                     .And(cf.ByName(messageText))
                     .And(cf.ByAutomationId(messageText)));
+            return all.Length > 0 ? all[^1] : null;
         }
         catch (Exception ex)
         {

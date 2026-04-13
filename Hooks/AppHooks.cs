@@ -41,6 +41,12 @@ public sealed class AppHooks
         container.RegisterInstanceAs(TestSettings.Load());
     }
 
+    [BeforeScenario]
+    public void BeforeScenario()
+    {
+        Console.WriteLine($"\n▶ {_scenarioContext.ScenarioInfo.Title}");
+    }
+
     [AfterScenario]
     public void AfterScenario()
     {

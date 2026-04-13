@@ -21,4 +21,7 @@ public partial class EditSentMessageFeature;
 public partial class PerformAgentDeviceControlFeature;
 
 [Order(6)]
+public partial class AgentResponseBenchmarkFeature;
+
+[Order(7)]
 public partial class PerformAgentCommandProbeFeature;

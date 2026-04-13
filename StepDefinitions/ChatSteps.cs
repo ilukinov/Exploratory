@@ -58,11 +58,7 @@ public sealed class ChatSteps
     [Then("the agent should respond within {int} seconds")]
     public void ThenAgentShouldRespond(int timeoutSeconds)
     {
-        var lastMessage = _scenarioContext.TryGetValue("LastSentMessage", out var msg)
-            ? msg.ToString() ?? "test message"
-            : "test message";
-
-        _chatHistory.WaitForAgentResponse(lastMessage, TimeSpan.FromSeconds(timeoutSeconds))
+        _chatHistory.WaitForAgentResponse(TimeSpan.FromSeconds(timeoutSeconds))
             .Should().BeTrue(
                 because: $"the AI assistant should post a response within {timeoutSeconds} seconds");
     }

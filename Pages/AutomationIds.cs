@@ -18,6 +18,9 @@ public static class AutomationIds
 
     // Agent response card elements
     public const string AnswerCard = "AnswerCard";
+    public const string QuestionGrid = "questionGrid";
+    public const string AnswerGrid = "AnswerGrid";
+    public const string ResponseButtonsGrid = "ResponseButtonsGrid";
     public const string CopyAnswer = "Copy Answer";
     public const string LikeButton = "Like";
     public const string DislikeButton = "Dislike";

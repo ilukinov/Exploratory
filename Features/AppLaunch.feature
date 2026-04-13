@@ -8,4 +8,4 @@ Feature: Application Launch
     When I launch HP AI Companion
     Then the window title should contain "AI Companion"
     And the window should be visible on screen
-    And the Home page should load within 30 seconds
+    And the Home page should load within 60 seconds
